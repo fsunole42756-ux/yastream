@@ -4,7 +4,7 @@ import type { ContentDetail } from "../source/meta.js";
 import { Logger } from "../utils/logger.js";
 import { db } from "./drizzle.js";
 import { content, EContentInsert, type EContent } from "./schema/content.js";
-import { kv } from "./schema/kv.js";
+import { EKVInsert, kv } from "./schema/kv.js";
 import {
   EProviderContentInsert,
   providerContent,
@@ -327,6 +327,25 @@ export function setKv(
       },
     })
     .run();
+}
+export async function setKvs(kvs: EKVInsert[]) {
+  if (!db) return;
+  try {
+    await db
+      .insert(kv)
+      .values(kvs)
+      .onConflictDoUpdate({
+        target: kv.key,
+        set: {
+          value: sql.raw(`excluded.${kv.value.name}`),
+          size: sql.raw(`excluded.${kv.size.name}`),
+          expiresAt: sql.raw(`excluded.${kv.expiresAt.name}`),
+        },
+      })
+      .run();
+  } catch (e) {
+    logger.error(`Failed to upsert kvs | ${e}`);
+  }
 }
 
 export function getKv(key: string) {

@@ -75,7 +75,7 @@ export function cleanUrl(url: string) {
   return url.replace(/\?.*$/, "");
 }
 
-export function getOrigin(url: string) {
+export function parseOrigin(url: string) {
   const hostname = new URL(url).origin;
   return hostname;
 }

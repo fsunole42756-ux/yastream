@@ -23,19 +23,14 @@ import { COMMON_TTL } from "../db/sqlite.js";
 import { Prefix, UserConfig } from "../lib/manifest.js";
 import StreamService from "../service/resource/stream-service.js";
 import SubtitleService from "../service/resource/subtitle-service.js";
-import {
-  axiosGet,
-  getKisskhBaseUrl,
-  markKisskhUrlFail,
-  markKisskhUrlSuccess,
-} from "../utils/axios.js";
+import { axiosGet } from "../utils/axios.js";
 import { cache } from "../utils/cache.js";
 import { RATE_LIMIT_NAME } from "../utils/constant.js";
 import { hashSHA256 } from "../utils/crypto.js";
 import { getOrigin } from "../utils/domain.js";
 import { ENV } from "../utils/env.js";
 import { RateLimitError } from "../utils/error.js";
-import { cleanUrl, formatStreamTitle } from "../utils/format.js";
+import { cleanUrl, formatStreamTitle, parseOrigin } from "../utils/format.js";
 import { matchTitle } from "../utils/fuse.js";
 import { parseStreamInfo } from "../utils/info.js";
 import { CountryCode, iso639FromCountryCode } from "../utils/language.js";
@@ -759,6 +754,71 @@ class KissKHScraperr extends BaseProvider {
     }
     return url;
   }
+}
+
+interface UrlMetrics {
+  success: number;
+  fail: number;
+  lastUsed: number;
+}
+
+const kisskhMetrics = new Map<string, UrlMetrics>();
+
+function selectKisskhUrl(): string {
+  for (const url of ENV.KISSKH_URLS) {
+    const metrics = kisskhMetrics.get(url);
+    if (!metrics || metrics.fail === 0) {
+      return url;
+    }
+  }
+  if (Math.random() < 0.2) {
+    const randomIndex = Math.floor(Math.random() * ENV.KISSKH_URLS.length);
+    return ENV.KISSKH_URLS[randomIndex]!;
+  }
+  const sorted = ENV.KISSKH_URLS.map((url) => ({
+    url,
+    metrics: kisskhMetrics.get(url),
+  })).sort((a, b) => {
+    const aScore =
+      ((a.metrics?.success ?? 0) + 1) / ((a.metrics?.fail ?? 0) + 1);
+    const bScore =
+      ((b.metrics?.success ?? 0) + 1) / ((b.metrics?.fail ?? 0) + 1);
+    return bScore - aScore;
+  });
+  return sorted[0]?.url || "https://kisskh.co";
+}
+
+export function getKisskhMetrics(): Map<string, UrlMetrics> {
+  return kisskhMetrics;
+}
+
+export function getKisskhBaseUrl(): string {
+  return selectKisskhUrl();
+}
+
+export function markKisskhUrlSuccess(url: string): void {
+  const host = parseOrigin(url);
+  const newMetrics = {
+    success: 0,
+    fail: 0,
+    lastUsed: 0,
+  };
+  const metrics = kisskhMetrics.get(host) ?? newMetrics;
+  metrics.success++;
+  metrics.lastUsed = Date.now();
+  kisskhMetrics.set(host, metrics);
+}
+
+export function markKisskhUrlFail(url: string): void {
+  const host = parseOrigin(url);
+  const metrics = kisskhMetrics.get(host) ?? {
+    success: 0,
+    fail: 0,
+    lastUsed: 0,
+  };
+  metrics.fail++;
+  metrics.lastUsed = Date.now();
+  kisskhMetrics.set(host, metrics);
 }
 
 export default KissKHScraperr;

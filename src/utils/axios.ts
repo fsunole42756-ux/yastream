@@ -5,7 +5,6 @@ import { decryptString } from "../source/onetouchtv-crypto.js";
 import { cache } from "./cache.js";
 import { ENV } from "./env.js";
 import { RateLimitError } from "./error.js";
-import { getOrigin } from "./format.js";
 import { Logger } from "./logger.js";
 
 // process.setMaxListeners(20);
@@ -69,66 +68,7 @@ function getClient(url: string) {
   return defaultClient;
 }
 
-interface UrlMetrics {
-  success: number;
-  fail: number;
-  lastUsed: number;
-}
 
-const kisskhMetrics = new Map<string, UrlMetrics>();
-
-function selectKisskhUrl(): string {
-  for (const url of ENV.KISSKH_URLS) {
-    const metrics = kisskhMetrics.get(url);
-    if (!metrics || metrics.fail === 0) {
-      return url;
-    }
-  }
-  const sorted = ENV.KISSKH_URLS.map((url) => ({
-    url,
-    metrics: kisskhMetrics.get(url),
-  })).sort((a, b) => {
-    const aScore =
-      ((a.metrics?.success ?? 0) + 1) / ((a.metrics?.fail ?? 0) + 1);
-    const bScore =
-      ((b.metrics?.success ?? 0) + 1) / ((b.metrics?.fail ?? 0) + 1);
-    return bScore - aScore;
-  });
-  return sorted[0]?.url ?? "https://kisskh.co";
-}
-
-export function getKisskhMetrics(): Map<string, UrlMetrics> {
-  return kisskhMetrics;
-}
-
-export function getKisskhBaseUrl(): string {
-  return selectKisskhUrl();
-}
-
-export function markKisskhUrlSuccess(url: string): void {
-  const host = getOrigin(url);
-  const newMetrics = {
-    success: 0,
-    fail: 0,
-    lastUsed: 0,
-  };
-  const metrics = kisskhMetrics.get(host) ?? newMetrics;
-  metrics.success++;
-  metrics.lastUsed = Date.now();
-  kisskhMetrics.set(host, metrics);
-}
-
-export function markKisskhUrlFail(url: string): void {
-  const host = getOrigin(url);
-  const metrics = kisskhMetrics.get(host) ?? {
-    success: 0,
-    fail: 0,
-    lastUsed: 0,
-  };
-  metrics.fail++;
-  metrics.lastUsed = Date.now();
-  kisskhMetrics.set(host, metrics);
-}
 
 const logger = new Logger("AXIOS");
 export async function axiosGet<T>(

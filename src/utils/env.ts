@@ -52,7 +52,6 @@ const envSchema = z.object({
   // Database (optional - only used when DATABASE_ENABLED is true)
   DATABASE_ENABLED: z.coerce.boolean().default(false),
   DATABASE_URL: z.string().default("data/yastream.db"),
-  DATABASE_CLEAN_KV_MINUTES: z.coerce.number().default(20),
 
   // Kisskh domains
   KISSKH_URLS: z

@@ -1,4 +1,6 @@
-import { cleanKv, deleteKv, getKv, setKv } from "../db/queries.js";
+import { create } from "node:domain";
+import { cleanKv, deleteKv, getKv, setKv, setKvs } from "../db/queries.js";
+import { EKVInsert } from "../db/schema/kv.js";
 import { ENV } from "./env.js";
 import { Logger } from "./logger.js";
 
@@ -13,19 +15,6 @@ class GlobalCache {
   private cache = new Map<string, CacheValue>();
   private MAX_BYTES = ENV.CACHE_SIZE_MB * 1024 * 1024;
   private currentByteSize = 0;
-
-  constructor() {
-    setInterval(
-      () => {
-        try {
-          cleanKv();
-        } catch (e) {
-          logger.error(`Failed to clean KV | ${e}`);
-        }
-      },
-      ENV.DATABASE_CLEAN_KV_MINUTES * 60 * 1000,
-    );
-  }
 
   /**
    * @param key Unique identifier (e.g., episode ID)
@@ -53,11 +42,6 @@ class GlobalCache {
     // 4. Set the new item
     logger.debug(`Set ${ttlMs}ms | ${key}`);
     this.cache.set(key, { value, size: newSize, expiresAt });
-    try {
-      setKv(key, value, newSize, expiresAt);
-    } catch (e) {
-      logger.error(`Failed to persist cache to DB | ${key} | ${e}`);
-    }
     this.currentByteSize += newSize;
   }
 
@@ -110,6 +94,25 @@ class GlobalCache {
   clearAll() {
     this.cache.clear();
     this.currentByteSize = 0;
+  }
+
+  persistDb() {
+    logger.log(`Persisting cache...`);
+    try {
+      const entries = this.cache.entries();
+      const kvCache: EKVInsert[] = entries
+        .map(([key, entry]) => ({
+          key: key as string,
+          createdAt: Date.now(),
+          value: JSON.stringify(entry.value),
+          size: entry.size as number,
+          expiresAt: entry.expiresAt as number,
+        }))
+        .toArray();
+      setKvs(kvCache);
+    } catch (e) {
+      logger.error(`Failed to persist cache to DB | ${e}`);
+    }
   }
 }
 

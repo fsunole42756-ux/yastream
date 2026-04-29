@@ -12,6 +12,7 @@ import { API } from "./utils/constant.js";
 import { ENV } from "./utils/env.js";
 import { Logger } from "./utils/logger.js";
 import { formatStreamTitle } from "./utils/format.js";
+import { cache } from "./utils/cache.js";
 
 const logger = new Logger("SERVER");
 const HOST = "0.0.0.0";
@@ -64,4 +65,13 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 process.on("uncaughtException", (err) => {
   logger.error(`CRASH PREVENTED ${err}`);
+});
+
+process.on("SIGTERM", () => {
+  logger.log("SIGTERM");
+  // cache.persistDb();
+});
+process.on("SIGINT", () => {
+  logger.log("SIGINT");
+  // cache.persistDb();
 });

@@ -3,9 +3,9 @@ import { tailwind } from "hono-tailwind";
 import ProviderService from "../../service/provider/provider-service.js";
 import StreamService from "../../service/resource/stream-service.js";
 import SubtitleService from "../../service/resource/subtitle-service.js";
-import { getKisskhBaseUrl, getKisskhMetrics } from "../../utils/axios.js";
 import { cache } from "../../utils/cache.js";
 import { ENV } from "../../utils/env.js";
+import { getKisskhBaseUrl, getKisskhMetrics } from "../../source/kisskh.js";
 
 const dashboard = new Hono();
 const PAGE_SIZE = 20;
