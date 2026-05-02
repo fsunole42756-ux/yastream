@@ -40,7 +40,6 @@ export class ProbeInfoError extends Error {
   }
 }
 
-
 export class KisskhDetailError extends Error {
   constructor(message: string) {
     super(message);
@@ -57,6 +56,25 @@ export class KisskhTokenError extends Error {
   constructor(message: string) {
     super(message);
     this.name = ErrorName.KISSKH_TOKEN;
+  }
+}
+// Onetouch
+export class OnetouchSearchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = ErrorName.ONETOUCHTV_SEARCH;
+  }
+}
+export class OnetouchDetailError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = ErrorName.ONETOUCHTV_DETAIL;
+  }
+}
+export class OnetouchEpisodeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = ErrorName.ONETOUCHTV_EPISODE;
   }
 }
 enum ErrorName {
@@ -79,6 +97,7 @@ enum ErrorName {
   KISSKH_EPISODE = "[Kisskh] Episode Error",
   KISSKH_TOKEN = "[Kisskh] Token Error",
   // ONETOUCHTV
+  ONETOUCHTV_SEARCH = "[Onetouchtv] Search Error",
   ONETOUCHTV_DETAIL = "[Onetouchtv] Detail Error",
   ONETOUCHTV_EPISODE = "[Onetouchtv] Episode Error",
 }
@@ -88,6 +107,7 @@ export function handleError(
   logger: Logger = new Logger("ERROR"),
   message: string = "",
 ): Error | null {
+  // Utils
   if (error instanceof RateLimitError) {
     logger.warn(`${message} | ${error.message}`);
     return error;
@@ -104,14 +124,7 @@ export function handleError(
     logger.warn(`${message} | ${error.message}`);
     return error;
   }
-  if (error instanceof KisskhDetailError) {
-    logger.warn(`${message} | ${error.message}`);
-    return error;
-  }
-  if (error instanceof KisskhEpisodeError) {
-    logger.warn(`${message} | ${error.message}`);
-    return error;
-  }
+  // Meta
   if (error instanceof TmdbError) {
     logger.warn(`${message} | ${error.message}`);
     return error;
@@ -120,10 +133,33 @@ export function handleError(
     logger.warn(`${message} | ${error.message}`);
     return error;
   }
+  // Kisskh
+  if (error instanceof KisskhDetailError) {
+    logger.warn(`${message} | ${error.message}`);
+    return error;
+  }
+  if (error instanceof KisskhEpisodeError) {
+    logger.warn(`${message} | ${error.message}`);
+    return error;
+  }
   if (error instanceof KisskhTokenError) {
     logger.error(`${message} | ${error.message}`);
     return error;
   }
+  // Onetouch
+  if (error instanceof OnetouchSearchError) {
+    logger.warn(`${message} | ${error.message}`);
+    return error;
+  }
+  if (error instanceof OnetouchDetailError) {
+    logger.warn(`${message} | ${error.message}`);
+    return error;
+  }
+  if (error instanceof OnetouchEpisodeError) {
+    logger.warn(`${message} | ${error.message}`);
+    return error;
+  }
+  // Other error
   if (error instanceof Error) {
     if (error.message.includes("lock")) {
       logger.error(`${message} | ${error.message}`);

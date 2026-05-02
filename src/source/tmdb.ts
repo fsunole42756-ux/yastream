@@ -203,7 +203,7 @@ class TMDBService extends BaseMeta {
       }
       return null;
     } catch (error: any) {
-      this.logger.error(`Search movie | ${error.message}`);
+      handleError(error, this.logger, `Search movie`);
       return null;
     }
   }
@@ -223,7 +223,7 @@ class TMDBService extends BaseMeta {
 
       return null;
     } catch (error: any) {
-      this.logger.error(`Find movie | ${error.message}`);
+      handleError(error, this.logger, `Find movie`);
       return null;
     }
   }
@@ -277,7 +277,7 @@ class TMDBService extends BaseMeta {
 
       return null;
     } catch (error: any) {
-      this.logger.error(`Find series | ${error.message}`);
+      handleError(error, this.logger, `Find series`);
       return null;
     }
   }
@@ -304,7 +304,7 @@ class TMDBService extends BaseMeta {
 
       return null;
     } catch (error: any) {
-      this.logger.error(`Get movie details error | ${error.message}`);
+      handleError(error, this.logger, `Get movie details error`);
       return null;
     }
   }
@@ -352,7 +352,7 @@ class TMDBService extends BaseMeta {
       const response = await this._getRequest<TmdbExternalID>(endpoint);
       return response;
     } catch (error) {
-      this.logger.error(`Get external ID error | ${error}`);
+      handleError(error, this.logger, `Get external ID error`);
       return null;
     }
   }

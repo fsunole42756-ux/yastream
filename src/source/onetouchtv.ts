@@ -22,9 +22,17 @@ import { EStreamInsert } from "../db/schema/streams.js";
 import { COMMON_TTL } from "../db/sqlite.js";
 import { Prefix, UserConfig } from "../lib/manifest.js";
 import StreamService from "../service/resource/stream-service.js";
+import SubtitleService from "../service/resource/subtitle-service.js";
 import { axiosGet } from "../utils/axios.js";
 import { cache } from "../utils/cache.js";
 import { hashSHA256 } from "../utils/crypto.js";
+import {
+  handleError,
+  MatchingError,
+  OnetouchDetailError,
+  OnetouchEpisodeError,
+  OnetouchSearchError,
+} from "../utils/error.js";
 import { cleanUrl, extractTitle, formatStreamTitle } from "../utils/format.js";
 import { matchTitle } from "../utils/fuse.js";
 import { probeStreamInfo } from "../utils/info.js";
@@ -33,7 +41,6 @@ import { ContentDetail } from "./meta.js";
 import { getPosterUrl, PosterParam } from "./poster/poster.js";
 import { BaseProvider } from "./provider.js";
 import { tmdb } from "./tmdb.js";
-import SubtitleService from "../service/resource/subtitle-service.js";
 
 interface OnetouchtvTop {
   result: {
@@ -310,7 +317,7 @@ export class OnetouchtvScrapper extends BaseProvider {
       );
       return metas;
     } catch (error) {
-      this.logger.error(`Failed to get catalog ${args.id} | ${error}`);
+      handleError(error, this.logger, `Failed to get catalog ${args.id}`);
       return [];
     }
   }
@@ -390,7 +397,11 @@ export class OnetouchtvScrapper extends BaseProvider {
       }
       return meta;
     } catch (error) {
-      this.logger.error(`Failed to get meta for ${content.title} | ${error}`);
+      handleError(
+        error,
+        this.logger,
+        `Failed to get meta for ${content.title}`,
+      );
       return null;
     }
   }
@@ -525,12 +536,12 @@ export class OnetouchtvScrapper extends BaseProvider {
         }),
       );
       if (streams.length > 0) {
-        cache.set(streamKey, streams, 1 * 60 * 60 * 1000);
+        cache.set(streamKey, streams, COMMON_TTL.stream);
         upsertStream(streamRows);
       }
       return streams;
     } catch (error) {
-      this.logger.error(`Fail to get streams ${content.title} | ${error}`);
+      handleError(error, this.logger, `Fail to get streams ${content.title}`);
       return [];
     }
   }
@@ -601,11 +612,11 @@ export class OnetouchtvScrapper extends BaseProvider {
     const url = `${this.baseUrl}/vod/search?page=1&keyword=${title}`;
     this.logger.log(`GET search | ${url}`);
     const data = await axiosGet<OnetouchtvSearch>(url);
-    if (!data) throw new Error("Failed to get search results");
+    if (!data) throw new OnetouchSearchError("Failed to get search results");
     // const data: OnetouchtvSearch = decryptString(encryptedData);
     const result = data.result;
     const details = isFilter ? matchTitle(result, title, year, season) : result;
-    if (!details[0]) throw new Error("No matching search results");
+    if (!details[0]) throw new MatchingError("No matching search results");
     return { result: details };
   }
 
@@ -613,7 +624,7 @@ export class OnetouchtvScrapper extends BaseProvider {
     const url = `${this.baseUrl}/vod/${id}/detail`;
     this.logger.log(`GET detail | ${url}`);
     const detailData = await axiosGet<OnetouchtvDetail>(url);
-    if (!detailData) throw new Error("Failed to get detail");
+    if (!detailData) throw new OnetouchDetailError("Failed to get detail");
     // const detailData: OnetouchtvDetail = decryptString(encryptedDetail);
 
     // Save provider content
@@ -644,7 +655,8 @@ export class OnetouchtvScrapper extends BaseProvider {
     const url = `${this.baseUrl}/vod/${id}/episode/${episode}`;
     this.logger.log(`GET episode detail | ${url}`);
     const detailData = await axiosGet<OnetouchtvEpisode>(url);
-    if (!detailData) throw new Error("Failed to get episode detail");
+    if (!detailData)
+      throw new OnetouchEpisodeError("Failed to get episode detail");
     return detailData;
   }
 }

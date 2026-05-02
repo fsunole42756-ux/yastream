@@ -1,5 +1,4 @@
-import { create } from "node:domain";
-import { cleanKv, deleteKv, getKv, setKv, setKvs } from "../db/queries.js";
+import { deleteKv, getKv, setKvs } from "../db/queries.js";
 import { EKVInsert } from "../db/schema/kv.js";
 import { ENV } from "./env.js";
 import { Logger } from "./logger.js";
