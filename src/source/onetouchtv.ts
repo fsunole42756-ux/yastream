@@ -523,7 +523,32 @@ export class OnetouchtvScrapper extends BaseProvider {
             streamRow.duration = (info.hours * 60 + info.minutes).toString();
           }
           if (source.url.includes("m3u8")) {
-            const playlist = await axiosGet<string>(source.url);
+            let playlistUrl = source.url;
+            let playlist: string | null = null;
+            let attempts = 0;
+            const maxAttempts = 2;
+            while (attempts < maxAttempts) {
+              this.logger.log(`GET playlist | ${playlistUrl}`);
+              playlist = await axiosGet<string>(playlistUrl);
+              if (!playlist) break;
+              if (!playlist.includes("aapanel.devcorp.me")) {
+                break;
+              }
+              // Parse last EXT-X-STREAM-INF URL
+              const lines = playlist.split("\n");
+              let lastStreamUrl: string | null = null;
+              for (let i = lines.length - 1; i >= 0; i--) {
+                const line = lines[i]?.trim();
+                if (line && !line.startsWith("#")) {
+                  lastStreamUrl = line;
+                  break;
+                }
+              }
+              if (!lastStreamUrl) break;
+              this.logger.log(`Playlist redirected to ${lastStreamUrl}`);
+              playlistUrl = lastStreamUrl;
+              attempts++;
+            }
             if (playlist) {
               streamRow.playlist = playlist;
               streamRow.hash = hashSHA256(playlist);
