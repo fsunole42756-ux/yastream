@@ -11,7 +11,7 @@ import { axiosGet } from "../utils/axios.js";
 import { cache } from "../utils/cache.js";
 import { formatStreamTitle } from "../utils/format.js";
 import { matchTitle, Search } from "../utils/fuse.js";
-import { parseStreamInfo } from "../utils/info.js";
+import { probeStreamInfo } from "../utils/info.js";
 import { ContentDetail } from "./meta.js";
 import { BaseProvider } from "./provider.js";
 
@@ -98,7 +98,7 @@ export class OphimScraper extends BaseProvider {
       const url = episodeDetail?.link_m3u8;
       if (!url) return [];
       this.logger.log(`Stream Url | ${url}`);
-      const info = config.info ? await parseStreamInfo(url) : undefined;
+      const info = config.info ? await probeStreamInfo(url) : undefined;
       const formatTitle = formatStreamTitle(
         data.data.item.name,
         year,

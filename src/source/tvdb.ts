@@ -6,6 +6,7 @@ import { ENV } from "../utils/env.js";
 import { CountryCode, iso639FromCountryCode } from "../utils/language.js";
 import { BaseMeta, ContentDetail } from "./meta.js";
 import { Provider } from "./provider.js";
+import { TvdbError } from "../utils/error.js";
 
 interface TvdbMovieResult {
   data: {
@@ -179,7 +180,7 @@ class TVDBService extends BaseMeta {
       return token;
     } catch (error: any) {
       this.logger.error(`Auth failed | ${error.message}`);
-      throw new Error("TVDB Authentication failed");
+      throw new TvdbError("TVDB Authentication failed");
     }
   }
 }

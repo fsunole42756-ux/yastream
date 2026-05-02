@@ -7,6 +7,7 @@ import { extractTitle } from "../utils/format.js";
 import { matchTitle, Search } from "../utils/fuse.js";
 import { BaseMeta, ContentDetail } from "./meta.js";
 import { Provider } from "./provider.js";
+import { handleError, TmdbError } from "../utils/error.js";
 
 export interface TmdbFindResponse {
   movie_results: TmdbMovieResult[];
@@ -80,7 +81,7 @@ class TMDBService extends BaseMeta {
   private baseUrl: string = "https://api.themoviedb.org/3";
   private imageUrl: string = "https://image.tmdb.org";
 
-  async searchDetailImdb(
+  async searchDetail(
     search: string,
     type: ContentType,
     year?: number,
@@ -157,7 +158,7 @@ class TMDBService extends BaseMeta {
         if (detail?.imdbId) {
           tv.imdbId = detail?.imdbId;
         }
-        this.logger.log(`Search | ${tv.title} ${tv.year} ${tv.imdbId || ""}`);
+        this.logger.log(`Found | ${tv.title} ${tv.year} ${tv.imdbId || ""}`);
         if (images) {
           if (images.logos.length > 0) {
             const filePath =
@@ -172,7 +173,7 @@ class TMDBService extends BaseMeta {
       }
       return null;
     } catch (error: any) {
-      this.logger.error(`Search series | ${error.message}`);
+      handleError(error, this.logger, `Search series`);
       return null;
     }
   }
@@ -334,7 +335,7 @@ class TMDBService extends BaseMeta {
 
       return null;
     } catch (error: any) {
-      this.logger.error(`Get series details error | ${error.message}`);
+      handleError(error, this.logger, `Get series details error`);
       return null;
     }
   }
@@ -376,7 +377,7 @@ class TMDBService extends BaseMeta {
     this.logger.log(`GET | ${url}`);
     const data = await axiosGet<T>(`${url}`, config);
     if (!data) {
-      throw new Error(`[TMDB  ] Not found data ${url}`);
+      throw new TmdbError(`[TMDB  ] Not found data ${url}`);
     }
     return data;
   }

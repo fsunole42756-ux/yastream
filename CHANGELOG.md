@@ -1,3 +1,8 @@
+# v0.7.2 2026-05-02
+
+- Use database for all streams/subtitles if found
+- Log less error, mainly for unknown error
+
 # v0.7.1 2026-04-26
 
 - Default RPDB poster to rounded blocks

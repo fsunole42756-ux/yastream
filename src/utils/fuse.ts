@@ -3,6 +3,7 @@ import { token_sort_ratio } from "fuzzball";
 import { Logger } from "./logger.js";
 import { ENV } from "./env.js";
 import { normalize } from "./format.js";
+import { FuseError, MatchingError } from "./error.js";
 
 interface SearchItem<T> {
   original: T;
@@ -68,14 +69,14 @@ export function matchTitle<T extends Search>(
   }
 
   if (!best) {
-    throw new Error(
+    throw new FuseError(
       `FUSE filtered all results | ${title} ${year} Season ${season}`,
     );
   }
   const candidateTitle = best.fuseResult.item.normalizedTitle;
   const tokenScore = token_sort_ratio(best.queryUsed, candidateTitle);
   if (tokenScore <= ENV.MIN_MATCHING_SCORE) {
-    throw new Error(
+    throw new MatchingError(
       `Token-set score too low (${tokenScore}) | "${best.queryUsed}" -> "${candidateTitle}"`,
     );
   }

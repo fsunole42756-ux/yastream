@@ -13,7 +13,7 @@ import { axiosGet } from "../utils/axios.js";
 import { cache } from "../utils/cache.js";
 import { ENV } from "../utils/env.js";
 import { formatStreamTitle } from "../utils/format.js";
-import { parseStreamInfo } from "../utils/info.js";
+import { probeStreamInfo } from "../utils/info.js";
 import { ContentDetail } from "./meta.js";
 import { BaseProvider } from "./provider.js";
 
@@ -173,7 +173,7 @@ export class IDramaScraper extends BaseProvider {
       this.logger.debug(`Title ${title}`);
       const url = episode ? urls[episode - 1] : urls[0];
       if (!url) return [];
-      const info = config.info ? await parseStreamInfo(url) : undefined;
+      const info = config.info ? await probeStreamInfo(url) : undefined;
       const formatTitle = formatStreamTitle(
         title,
         year,

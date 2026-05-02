@@ -11,8 +11,6 @@ import { buildManifest } from "./lib/manifest.js";
 import { API } from "./utils/constant.js";
 import { ENV } from "./utils/env.js";
 import { Logger } from "./utils/logger.js";
-import { formatStreamTitle } from "./utils/format.js";
-import { cache } from "./utils/cache.js";
 
 const logger = new Logger("SERVER");
 const HOST = "0.0.0.0";
@@ -70,8 +68,10 @@ process.on("uncaughtException", (err) => {
 process.on("SIGTERM", () => {
   logger.log("SIGTERM");
   // cache.persistDb();
+  process.exit();
 });
 process.on("SIGINT", () => {
   logger.log("SIGINT");
   // cache.persistDb();
+  process.exit();
 });

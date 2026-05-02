@@ -3,6 +3,7 @@ import EventEmitter from "events";
 import https from "https";
 import { decryptString } from "../source/onetouchtv-crypto.js";
 import { cache } from "./cache.js";
+import { USER_AGENT } from "./constant.js";
 import { ENV } from "./env.js";
 import { RateLimitError } from "./error.js";
 import { Logger } from "./logger.js";
@@ -14,8 +15,9 @@ const httpsAgent = new https.Agent({
   keepAlive: true,
   maxSockets: 20,
   maxFreeSockets: 10,
-  timeout: 11000,
+  timeout: 60000,
 });
+
 function createClient(
   // maxRequests: number,
   // duration: string = "1s",
@@ -30,8 +32,7 @@ function createClient(
 }
 
 const defaultClient = createClient({
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "User-Agent": USER_AGENT,
   Accept: "aplication/json",
   "Accept-Language": "en-US,en;q=0.5",
   "Accept-Encoding": "gzip, deflate",
@@ -39,16 +40,14 @@ const defaultClient = createClient({
   "Upgrade-Insecure-Requests": "1",
 });
 const kisskhClient = createClient({
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "User-Agent": USER_AGENT,
   Accept: "application/json",
 });
 const onetouchtvHost = Buffer.from("YXBpMy5kZXZjb3JwLm1l=", "base64").toString(
   "utf-8",
 );
 const onetouchtvClient = createClient({
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "User-Agent": USER_AGENT,
   Accept: "*/*",
   Origin: "https://onetouchtv.xyz",
   Referer: "https://onetouchtv.xyz",
@@ -68,8 +67,6 @@ function getClient(url: string) {
   return defaultClient;
 }
 
-
-
 const logger = new Logger("AXIOS");
 export async function axiosGet<T>(
   url: string,
@@ -84,39 +81,56 @@ export async function axiosGet<T>(
   let attempt = 0;
   let timeout = 0;
   let isRateLimit = false;
-  while (true) {
-    attempt++;
-    try {
-      const response = await http.get(url, { timeout: 10000, ...config });
-      const data = response.data;
-      cache.set(urlKey, data, cacheMs);
-      return data as T;
-    } catch (error: AxiosError | unknown) {
-      lastError = error;
-      const errorStatus = error instanceof AxiosError && error.response?.status;
-      isRateLimit = errorStatus === HttpStatusCode.TooManyRequests;
-      if (http === onetouchtvClient) {
-        logger.log(
-          `Error ${error instanceof AxiosError && error.response?.data}`,
-        );
-        isRateLimit = isRateLimit || errorStatus === HttpStatusCode.NotFound;
+
+  // Global timeout wrapper to prevent hanging forever
+  const globalTimeout = ENV.RETRY_TIMEOUT_MS + 10000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), globalTimeout);
+
+  try {
+    while (true) {
+      attempt++;
+      try {
+        const response = await http.get(url, {
+          timeout: 10000,
+          ...config,
+          signal: controller.signal as any,
+        });
+        clearTimeout(timeoutId);
+        const data = response.data;
+        cache.set(urlKey, data, cacheMs);
+        return data as T;
+      } catch (error: AxiosError | unknown) {
+        lastError = error;
+        const errorStatus =
+          error instanceof AxiosError && error.response?.status;
+        isRateLimit = errorStatus === HttpStatusCode.TooManyRequests;
+        if (http === onetouchtvClient) {
+          logger.log(
+            `Error ${error instanceof AxiosError && error.response?.data}`,
+          );
+          isRateLimit = isRateLimit || errorStatus === HttpStatusCode.NotFound;
+        }
+        if (!isRateLimit) break;
+        const delay = ENV.RETRY_DELAY_MS * attempt;
+        logger.log(`Retry ${attempt} | ${url}`);
+        const retryAfter = delay + Math.random() * ENV.RETRY_JITTER_MS;
+        timeout += retryAfter;
+        if (timeout >= ENV.RETRY_TIMEOUT_MS) {
+          logger.log(`Max timeout ${ENV.RETRY_TIMEOUT_MS}ms reached | ${url}`);
+          break;
+        }
+        await new Promise((r) => setTimeout(r, retryAfter));
       }
-      if (!isRateLimit) break;
-      const delay = ENV.RETRY_DELAY_MS * attempt;
-      logger.log(`Retry ${attempt} | ${url}`);
-      const retryAfter = delay + Math.random() * ENV.RETRY_JITTER_MS;
-      timeout += retryAfter;
-      if (timeout >= ENV.RETRY_TIMEOUT_MS) {
-        logger.log(`Max timeout ${ENV.RETRY_TIMEOUT_MS}ms reached | ${url}`);
-        break;
-      }
-      await new Promise((r) => setTimeout(r, retryAfter));
     }
+  } finally {
+    clearTimeout(timeoutId);
   }
-  logger.error(`Fail GET | ${url} ${lastError}`);
+
   if (isRateLimit) {
     throw new RateLimitError(url);
   }
+  logger.error(`Fail GET | ${url} ${lastError}`);
   return null;
 }
 

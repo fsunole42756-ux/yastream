@@ -3,12 +3,11 @@ import { tailwind } from "hono-tailwind";
 import ProviderService from "../../service/provider/provider-service.js";
 import StreamService from "../../service/resource/stream-service.js";
 import SubtitleService from "../../service/resource/subtitle-service.js";
+import { getKisskhBaseUrl, getKisskhMetrics } from "../../source/kisskh.js";
 import { cache } from "../../utils/cache.js";
 import { ENV } from "../../utils/env.js";
-import { getKisskhBaseUrl, getKisskhMetrics } from "../../source/kisskh.js";
 
 const dashboard = new Hono();
-const PAGE_SIZE = 20;
 
 function StatCard({ title, value }: { title: string; value: any }) {
   return (
@@ -109,7 +108,6 @@ dashboard.get("/", async (c) => {
   }
 
   const data = cache.getCacheStats();
-  const page = parseInt(c.req.query("page") ?? "0");
 
   const totalContent = await ProviderService.getTotalProviderContent();
   const totalStreams = await StreamService.getTotalStreams();
@@ -125,9 +123,6 @@ dashboard.get("/", async (c) => {
     (sum, m) => sum + m.fail,
     0,
   );
-
-  // const cacheData = data.data.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  // const totalPages = Math.ceil(data.data.length / PAGE_SIZE);
 
   return c.html(
     <html>
@@ -294,54 +289,6 @@ dashboard.get("/", async (c) => {
               </a>
             </div>
           </section>
-
-          {/* <div class="flex gap-3 my-5">
-            <a
-              href={`/dashboard?key=${userKey}&page=${Math.max(0, page - 1)}`}
-              class={`px-4 py-2 rounded-box transition-colors ${page === 0 ? "bg-secondary-background/50 text-secondary-foreground pointer-events-none" : "bg-secondary-background hover:bg-accent"}`}
-            >
-              Prev
-            </a>
-            <span class="px-4 py-2">
-              Page {page + 1} of {totalPages || 1}
-            </span>
-            <a
-              href={`/dashboard?key=${userKey}&page=${page + 1}`}
-              class={`px-4 py-2 rounded-box transition-colors ${page >= totalPages - 1 ? "bg-secondary-background/50 text-secondary-foreground pointer-events-none" : "bg-secondary-background hover:bg-accent"}`}
-            >
-              Next
-            </a>
-          </div> */}
-
-          {/* <div class="overflow-x-auto bg-secondary-background rounded-box max-h-96">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b-2 border-border-foreground sticky top-0 bg-secondary-background">
-                  <th class="text-left p-3">Key</th>
-                  <th class="text-left p-3">Value</th>
-                  <th class="text-left p-3">Expires</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cacheData.map((k) => (
-                  <tr
-                    key={k.key}
-                    class="border-b border-border-foreground last:border-b-0"
-                  >
-                    <td class="p-3 max-w-xs truncate font-mono text-xs">
-                      {k.key}
-                    </td>
-                    <td class="p-3 max-w-md truncate text-xs text-secondary-foreground">
-                      {JSON.stringify(k.value)}
-                    </td>
-                    <td class="p-3 text-xs text-secondary-foreground">
-                      {k.expiresAt.toISOString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div> */}
         </div>
       </body>
     </html>,

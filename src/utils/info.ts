@@ -1,6 +1,8 @@
 import { execSync } from "node:child_process";
 import { axiosGet } from "./axios.js";
 import { Logger } from "./logger.js";
+import { EStream } from "../db/schema/streams.js";
+import { handleError, ProbeInfoError } from "./error.js";
 
 const logger = new Logger("INFO");
 
@@ -28,7 +30,7 @@ interface ProbeInfo {
   };
 }
 
-export async function parseStreamInfo(
+export async function probeStreamInfo(
   url: string,
 ): Promise<StreamInfo | undefined> {
   let info: StreamInfo | undefined = { size: 0 };
@@ -37,19 +39,19 @@ export async function parseStreamInfo(
     const isM3u8 = uri.pathname.endsWith(".m3u8");
     const isMp4 = uri.pathname.endsWith(".mp4");
     if (isM3u8) {
-      info = await parseM3u8(url);
+      info = await probeM3u8(url);
     } else if (isMp4) {
-      info = await parseMp4(url);
+      info = await probeMp4(url);
     } else {
-      info = await parseMp4(url); // default work for both
+      info = await probeMp4(url); // default work for both
     }
   } catch (error) {
-    logger.error(`Fail to parse stream info | ${error}`);
+    handleError(error, logger, `Fail to probe stream info | ${url}`);
   }
   return info;
 }
 
-async function parseMp4(url: string): Promise<StreamInfo> {
+async function probeMp4(url: string): Promise<StreamInfo> {
   logger.log(`GET mp4 info | ${url}`);
   const data = await getProbeInfo(url);
   if (!data) return { size: 0 };
@@ -77,7 +79,7 @@ function getMinutes(durationSeconds: number) {
   return Math.floor((durationSeconds / 60) % 60);
 }
 
-async function parseM3u8(url: string): Promise<StreamInfo | undefined> {
+async function probeM3u8(url: string): Promise<StreamInfo | undefined> {
   logger.log(`GET m3u8 | ${url}`);
   const data = await axiosGet<string>(url);
   if (!data) return undefined;
@@ -113,10 +115,14 @@ async function parseM3u8(url: string): Promise<StreamInfo | undefined> {
   let gb = totalSizeInBytes / (1024 * 1024 * 1024);
   let probeResult;
   logger.debug(`First segment ${firstSegmentUrl}`);
-  if (firstSegmentUrl && isValidSegmentUrl(firstSegmentUrl)) {
-    probeResult = await getProbeInfo(firstSegmentUrl);
-  } else {
-    probeResult = await getProbeInfo(url);
+  try {
+    if (firstSegmentUrl && isValidSegmentUrl(firstSegmentUrl)) {
+      probeResult = await getProbeInfo(firstSegmentUrl);
+    } else {
+      probeResult = await getProbeInfo(url);
+    }
+  } catch (error) {
+    handleError(error, logger, `Fail to probe stream info | ${url}`);
   }
   if (probeResult?.format.duration && totalDuration == 0) {
     totalDuration = probeResult?.format.duration;
@@ -139,7 +145,7 @@ async function parseM3u8(url: string): Promise<StreamInfo | undefined> {
     width: probeResult.streams[0]?.width!,
   };
   logger.log(
-    `${hours} hours ${minutes} minutes, ${gb.toFixed(2)} GB, ${resolution.width} x ${resolution.height}`,
+    `${url} | ${hours} hours ${minutes} minutes, ${gb.toFixed(2)} GB, ${resolution.width} x ${resolution.height}`,
   );
   const info: StreamInfo = {
     hours: hours,
@@ -165,14 +171,13 @@ function isValidSegmentUrl(url: string) {
 function getProbeInfo(url: string): ProbeInfo | null {
   try {
     const cmd = `ffprobe -v error -select_streams v:0 -show_entries format=duration,size -show_entries stream=width,height,bit_rate -of json -allowed_segment_extensions ALL -extension_picky 0 "${url}"`;
-    const output = execSync(cmd).toString();
+    const output = execSync(cmd, { timeout: 10000 }).toString();
     const data: ProbeInfo = JSON.parse(output);
     const size = (data.streams[0]?.bit_rate! * data.format.duration) / 8;
     data.format.size = size / (1024 * 1024 * 1024);
     return data;
   } catch (err) {
-    logger.error(`FFprobe failed | Url ${url}, Error: ${err}`);
-    return null;
+    throw new ProbeInfoError(`FFprobe failed | Url ${url}, Error: ${err}`);
   }
 }
 
@@ -184,4 +189,26 @@ export function getDisplayResolution(resolution: Resolution) {
   if (width >= 1280 || height >= 534) return "720p";
   if (width >= 854 || height >= 480) return "480p";
   return "SD";
+}
+
+export function parseInfo(stream: EStream) {
+  let info: StreamInfo = {
+    size: 0,
+  };
+  if (stream.size) info.size = parseFloat(stream.size);
+  if (stream.duration) {
+    info.hours = parseInt(stream.duration) / 60;
+    info.minutes = parseInt(stream.duration) % 60;
+  }
+  if (stream.resolution) {
+    const width = stream.resolution.split("x")[0];
+    const height = stream.resolution.split("x")[1];
+    if (width && height) {
+      info.resolution = {
+        width: parseInt(width),
+        height: parseInt(height),
+      };
+    }
+  }
+  return info;
 }

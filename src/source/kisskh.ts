@@ -17,6 +17,7 @@ import {
   upsertStream,
   upsertSubtitles,
 } from "../db/queries.js";
+import { EContent } from "../db/schema/content.js";
 import { EStreamInsert } from "../db/schema/streams.js";
 import { ESubtitleInsert } from "../db/schema/subtitles.js";
 import { COMMON_TTL } from "../db/sqlite.js";
@@ -29,10 +30,21 @@ import { RATE_LIMIT_NAME } from "../utils/constant.js";
 import { hashSHA256 } from "../utils/crypto.js";
 import { getOrigin } from "../utils/domain.js";
 import { ENV } from "../utils/env.js";
-import { RateLimitError } from "../utils/error.js";
-import { cleanUrl, formatStreamTitle, parseOrigin } from "../utils/format.js";
+import {
+  handleError,
+  KisskhDetailError,
+  KisskhEpisodeError,
+  KisskhTokenError,
+  RateLimitError,
+} from "../utils/error.js";
+import {
+  cleanUrl,
+  extractTitle,
+  formatStreamTitle,
+  parseOrigin,
+} from "../utils/format.js";
 import { matchTitle } from "../utils/fuse.js";
-import { parseStreamInfo } from "../utils/info.js";
+import { probeStreamInfo } from "../utils/info.js";
 import { CountryCode, iso639FromCountryCode } from "../utils/language.js";
 import { getSetDecryptedSubtitle } from "./kisskh-subtitle.js";
 import { ContentDetail } from "./meta.js";
@@ -168,7 +180,7 @@ class KissKHScraperr extends BaseProvider {
       else return result.episodesCount == 1;
     });
     const tmdbDetails = await Promise.all(
-      filterResults.map((item) => tmdb.searchDetailImdb(item.title, type)),
+      filterResults.map((item) => tmdb.searchDetail(item.title, type)),
     );
     const metas = await Promise.all(
       filterResults.map(async (kissItem, index) => {
@@ -261,7 +273,7 @@ class KissKHScraperr extends BaseProvider {
 
     // 3. Search TMDB using the flattened list
     const tmdbDetails = await Promise.all(
-      flatDatas.map((item) => tmdb.searchDetailImdb(item.title, type)),
+      flatDatas.map((item) => tmdb.searchDetail(item.title, type)),
     );
 
     // 4. Map to final Meta format
@@ -335,18 +347,22 @@ class KissKHScraperr extends BaseProvider {
   ): Promise<MetaDetail | null> {
     const detail = await this.getDetail(content.id);
     let year = new Date(detail.releaseDate).getFullYear();
-    const tmdbDetail = await tmdb.searchDetailImdb(detail.title, type);
+    let date = new Date(detail.releaseDate).toISOString();
+    const tmdbDetail = await tmdb.searchDetail(detail.title, type);
     const background = tmdbDetail?.background || detail.thumbnail;
+    let oldContent: EContent | undefined = undefined;
     if (tmdbDetail) {
       detail.description = tmdbDetail.overview || detail.description;
       year = tmdbDetail.year;
-      const oldContent = await getContentByTmdb(tmdbDetail.id, type);
+      const tmdbDate = new Date();
+      tmdbDate.setFullYear(tmdbDetail.year);
+      date = tmdbDate.toISOString();
+      oldContent = await getContentByTmdb(tmdbDetail.id, type);
       if (oldContent) {
         upsertContent(oldContent.id, tmdbDetail, COMMON_TTL.content);
       }
     }
     const season = 1;
-    const date = new Date(detail.releaseDate).toISOString();
     const videos: MetaVideo[] = detail.episodes.map((ep) => {
       const episodeNum = ep.number;
       let id = `kisskh:${detail.id}:${season}:${episodeNum}`;
@@ -378,9 +394,11 @@ class KissKHScraperr extends BaseProvider {
     };
 
     const existingContent = await getProviderContentById(metaId);
-    if (existingContent) {
+    const contentId = oldContent ? oldContent.id : null;
+    if (existingContent && oldContent) {
       await upsertProviderContent({
         ...existingContent,
+        contentId: contentId,
         image: detail.thumbnail,
         year: year,
         ttl: null,
@@ -388,7 +406,7 @@ class KissKHScraperr extends BaseProvider {
     } else {
       await upsertProviderContent({
         id: metaId,
-        contentId: null,
+        contentId: contentId,
         title: detail.title,
         ttl: null,
         provider: this.name,
@@ -411,17 +429,19 @@ class KissKHScraperr extends BaseProvider {
       const streamKey = `streams:${type}:${this.name}:${id}:${season}:${episode}:${config.info}`;
       const cacheStreams = cache.get(streamKey);
       if (cacheStreams) return cacheStreams;
-      const savedStreams = await StreamService.getStreamsFromDb(
-        `${this.name}:${id}`,
+      const dbStreams = await StreamService.getDbStreams(
+        `${this.name}:${kisskhId}`,
         season ?? 1,
         episode ?? 1,
         this.displayName,
         config,
       );
-      if (savedStreams.length > 0) {
-        cache.set(streamKey, savedStreams, COMMON_TTL.stream);
-        return savedStreams;
+      if (dbStreams.length > 0) {
+        cache.set(streamKey, dbStreams, COMMON_TTL.stream);
+        return dbStreams;
       }
+      let streamId = parseInt(kisskhId ?? "0");
+      let streamTitle = title;
       if (!kisskhId) {
         const searchResult = await this.searchContent(
           title,
@@ -436,31 +456,20 @@ class KissKHScraperr extends BaseProvider {
           return [];
         }
         const search = searchResult[0];
-        const searchId = search.id;
-        const searchTitle = search.title;
-        const streams = await this.generateStreamsAndSubtitles(
-          searchId,
-          searchTitle,
-          content,
-          config,
-        );
-        if (streams.length > 0)
-          cache.set(streamKey, streams, COMMON_TTL.stream);
-        return streams;
-      } else {
-        const streams = await this.generateStreamsAndSubtitles(
-          parseInt(kisskhId),
-          title,
-          content,
-          config,
-        );
-        if (streams.length > 0)
-          cache.set(streamKey, streams, COMMON_TTL.stream);
-        return streams;
+        streamId = search.id;
+        streamTitle = search.title;
       }
+      const streams = await this.generateStreamsAndSubtitles(
+        streamId,
+        streamTitle,
+        content,
+        config,
+      );
+      if (streams.length > 0) cache.set(streamKey, streams, COMMON_TTL.stream);
+      return streams;
     } catch (error: any) {
+      handleError(error, this.logger);
       if (error instanceof RateLimitError) return [{ name: RATE_LIMIT_NAME }];
-      this.logger.error(`${error.message}`);
       return [];
     }
   }
@@ -470,7 +479,7 @@ class KissKHScraperr extends BaseProvider {
     let cacheSubtitles = cache.get(subtitleKey);
     if (cacheSubtitles) return cacheSubtitles;
     const savedSubtitles = await SubtitleService.getSubtitlesFromDb(
-      `${this.name}:${content.id}`,
+      `${this.name}:${content.kisskhId}`,
       content.season ?? 1,
       content.episode ?? 1,
     );
@@ -487,7 +496,8 @@ class KissKHScraperr extends BaseProvider {
       content.altTitle,
     );
     if (!search[0]) return [];
-    const episodeId = await this._getEpisode(search[0]?.id, content.episode);
+    const episodeData = await this._getEpisode(search[0]?.id, content.episode);
+    const episodeId = episodeData.episodeId;
     const subtitles = this._getSubtitles(episodeId);
     return subtitles;
   }
@@ -523,11 +533,43 @@ class KissKHScraperr extends BaseProvider {
     config: UserConfig,
   ): Promise<Stream[]> {
     const { episode, id, season, year, type } = content;
-    const episodeId = await this._getEpisode(kisskhId, episode);
+    const { episodeId, kisskhDetail } = await this._getEpisode(
+      kisskhId,
+      episode,
+    );
     const token = await this._getToken(episodeId, this.viGuid);
     const stream = await this._getStream(episodeId, token);
     if (!stream) return [];
     if (!stream.Video) return [];
+    const tmdbDetail = await tmdb.searchDetail(content.title, type);
+    if (tmdbDetail) {
+      const oldContent = await getContentByTmdb(tmdbDetail.id, type);
+      if (oldContent) {
+        const contentId = oldContent.id;
+        upsertContent(contentId, tmdbDetail, COMMON_TTL.content);
+        const providerContent = await getProviderContentById(
+          `${Prefix.KISSKH}:${kisskhId}`,
+        );
+        if (providerContent) {
+          upsertProviderContent({
+            ...providerContent,
+            contentId: contentId,
+          });
+        } else {
+          upsertProviderContent({
+            id: `${Prefix.KISSKH}:${kisskhId}`,
+            contentId: contentId,
+            title: extractTitle(kisskhDetail.title).title,
+            ttl: null,
+            provider: this.name,
+            externalId: kisskhId.toString(),
+            image: kisskhDetail.thumbnail,
+            year: year,
+            type: type,
+          });
+        }
+      }
+    }
     // Handle rate limit
     if (stream.Video.includes(RATE_LIMIT_NAME))
       throw new RateLimitError(stream.Video);
@@ -557,7 +599,7 @@ class KissKHScraperr extends BaseProvider {
         );
       upsertSubtitles(subtitleRows);
     }
-    const info = config.info ? await parseStreamInfo(url) : undefined;
+    const info = config.info ? await probeStreamInfo(url) : undefined;
     const formatTitle = formatStreamTitle(title, year, season, episode, info);
     const streamDatas: Stream[] = [
       {
@@ -605,7 +647,9 @@ class KissKHScraperr extends BaseProvider {
     if (!this.tokenJsCode) {
       const html = await axiosGet<string>(this.getBaseUrl() + "/index.html");
       if (!html)
-        throw new Error(`Failed to fetch index.html for token generation`);
+        throw new KisskhTokenError(
+          `Failed to fetch index.html for token generation`,
+        );
       const $ = cheerio.load(html);
       const scriptSrc = $('script[src*="common"]').attr("src");
       const jsCode = await axiosGet<string>(
@@ -622,11 +666,11 @@ class KissKHScraperr extends BaseProvider {
     try {
       const token = eval(sandbox);
       if (!token) {
-        throw new Error(`Token generation failed`);
+        throw new KisskhTokenError(`Token generation failed`);
       }
       return token;
     } catch (e) {
-      throw new Error(`Token generation failed | ${e}`);
+      throw new KisskhTokenError(`Token generation failed | ${e}`);
     }
   }
 
@@ -665,14 +709,18 @@ class KissKHScraperr extends BaseProvider {
     });
     if (episodesData) {
       return episodesData;
-    } else throw new Error(`Not found detail from id | ${kisskhId}`);
+    } else
+      throw new KisskhDetailError(`Not found detail from id | ${kisskhId}`);
   }
 
-  private async _getEpisode(seriesId: number, episode: number = 1) {
+  private async _getEpisode(
+    seriesId: number,
+    episode: number = 1,
+  ): Promise<{ episodeId: string; kisskhDetail: KisskhDetail }> {
     const detail = await this.getDetail(seriesId.toString());
     const episodeCount = detail.episodesCount;
     if (!detail || episodeCount === undefined) {
-      throw new Error("No episode data found");
+      throw new KisskhEpisodeError("No episode data found");
     }
     const fallbackEpisodeData = detail.episodes[episodeCount - episode];
     const episodeData =
@@ -682,12 +730,12 @@ class KissKHScraperr extends BaseProvider {
 
     const episodeId = episodeData?.id;
     if (!episodeId) {
-      throw new Error(
+      throw new KisskhEpisodeError(
         `Episode ID not found ${this.name}:${seriesId}:${episode}`,
       );
     }
     this.logger.debug(`EpisodeId | ${episodeId}`);
-    return episodeId.toString();
+    return { episodeId: episodeId.toString(), kisskhDetail: detail };
   }
 
   private async _getStream(episodeId: string, token: string) {
@@ -702,11 +750,11 @@ class KissKHScraperr extends BaseProvider {
       markKisskhUrlSuccess(url);
       return stream;
     } catch (error) {
-      this.logger.error(`Fail to get stream | ${error}`);
       if (error instanceof RateLimitError) {
         markKisskhUrlFail(url);
         return { Video: RATE_LIMIT_NAME };
       }
+      handleError(error, this.logger, `Fail to get stream`);
       return null;
     }
   }
@@ -790,6 +838,13 @@ function selectKisskhUrl(): string {
 
 export function getKisskhMetrics(): Map<string, UrlMetrics> {
   return kisskhMetrics;
+}
+
+/**
+ * Reset all KissKH metrics - useful when system is blocked or to clear stale data
+ */
+export function resetKisskhMetrics(): void {
+  kisskhMetrics.clear();
 }
 
 export function getKisskhBaseUrl(): string {

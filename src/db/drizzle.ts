@@ -1,9 +1,12 @@
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { Logger } from "../utils/logger.js";
-import { content } from "./schema/content.js";
+import { content, contentRelations } from "./schema/content.js";
 import { kv } from "./schema/kv.js";
-import { providerContent } from "./schema/provider_content.js";
+import {
+  providerContent,
+  providerContentRelations,
+} from "./schema/provider_content.js";
 import { streams } from "./schema/streams.js";
 import { subtitles } from "./schema/subtitles.js";
 import * as sqlite from "./sqlite.js";
@@ -18,6 +21,8 @@ export const db = sqlite.db
         streams,
         subtitles,
         kv,
+        contentRelations,
+        providerContentRelations,
       },
     })
   : null;

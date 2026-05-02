@@ -9,7 +9,7 @@ import {
 import { Prefix, UserConfig } from "../lib/manifest.js";
 import { axiosGet } from "../utils/axios.js";
 import { cache } from "../utils/cache.js";
-import { parseStreamInfo } from "../utils/info.js";
+import { probeStreamInfo } from "../utils/info.js";
 import { CountryCode, iso639FromCountryCode } from "../utils/language.js";
 import { getProxyLink } from "../utils/mediaflowproxy.js";
 import { ContentDetail } from "./meta.js";
@@ -122,7 +122,7 @@ export class KkphimScraper extends BaseProvider {
         const link = item.link_m3u8;
         this.logger.log(`Stream Url | ${link}`);
         const proxyLink = getProxyLink(link);
-        const info = config.info ? await parseStreamInfo(proxyLink) : undefined;
+        const info = config.info ? await probeStreamInfo(proxyLink) : undefined;
         const formatTitle = formatStreamTitle(
           `${name} | ${index === 0 ? "Phụ đề" : "Thuyết Minh"}`,
           year,

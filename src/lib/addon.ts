@@ -31,6 +31,7 @@ import { RATE_LIMIT_NAME } from "../utils/constant.js";
 import { extractTitle } from "../utils/format.js";
 import { Logger } from "../utils/logger.js";
 import { defaultConfig, Prefix, UserConfig } from "./manifest.js";
+import ProviderService from "../service/provider/provider-service.js";
 
 const kisskh = new KissKHScraper(Provider.KISSKH);
 const idrama = new IDramaScraper(Provider.IDRAMA);
@@ -57,13 +58,27 @@ async function getContent(
       const contentType = args.type === "series" ? "series" : "movie";
       const contentKey = `content:imdb:${imdbId}`;
       const cacheContent = cache.get(contentKey);
-      let content = cacheContent;
+      let content: ContentDetail | null = cacheContent;
+      // Get from DB
       if (!content) {
+        const dbContent = await ProviderService.getDbContent(contentType, {
+          imdbId,
+        });
+        if (dbContent) {
+          content = dbContent;
+          content.imdbId = imdbId;
+        }
+      }
+      // Get from TMDB
+      if (!content) {
+        // Get from tmdb
         content = await tmdb.findDetailImdb(imdbId, contentType);
-        if (content) cache.set(contentKey, content, COMMON_TTL.content);
+        if (content) {
+          cache.set(contentKey, content, COMMON_TTL.content);
+        }
       }
       if (!content) {
-        logger.error(`No TMDB found with IMDB ${imdbId}`);
+        logger.warn(`No TMDB found with IMDB ${imdbId}`);
         return null;
       }
       if (season) content.season = parseInt(season);
@@ -81,6 +96,12 @@ async function getContent(
       const contentKey = `content:tmdb:${tmdbId}`;
       const cacheContent = cache.get(contentKey);
       let content: ContentDetail | null = cacheContent;
+      if (!content) {
+        const dbContent = await ProviderService.getDbContent(contentType, {
+          tmdbId: parseInt(tmdbId),
+        });
+        content = dbContent ? dbContent : null;
+      }
       if (!content) {
         content = await tmdb.getDetailTmdb(tmdbId, contentType);
         if (content) cache.set(contentKey, content, COMMON_TTL.content);
@@ -105,6 +126,12 @@ async function getContent(
       const contentKey = `content:tvdb:${tvdbId}`;
       const cacheContent = cache.get(contentKey);
       let content: ContentDetail | null = cacheContent;
+      if (!content) {
+        const dbContent = await ProviderService.getDbContent(contentType, {
+          tvdbId: parseInt(tvdbId),
+        });
+        content = dbContent ? dbContent : null;
+      }
       if (!content) {
         content = await tvdb.getDetailTvdb(tvdbId, contentType);
         if (content) cache.set(contentKey, content, COMMON_TTL.content);
@@ -151,10 +178,20 @@ async function getContent(
       // id | kisskh:episodeId:season:episode
       const [prefix, kisskhId, season, episode] = args.id.split(":");
       if (!kisskhId) return null;
+      const contentType = args.type === "series" ? "series" : "movie";
       const contentKey = `content:kisskh:${kisskhId}`;
       const cacheContent = cache.get(contentKey);
       let content: ContentDetail | null = cacheContent;
-      if (!cacheContent) {
+      if (!content) {
+        const dbContent = await ProviderService.getDbContent(contentType, {
+          kisskhId,
+        });
+        if (dbContent) {
+          logger.log(`Found DB content ${contentKey}`);
+          content = dbContent;
+        }
+      }
+      if (!content) {
         const providerContent = await getProviderContentById(
           `${prefix}:${kisskhId}`,
         );
@@ -212,8 +249,15 @@ async function getContent(
       const [prefix, onetouchtvId, season, episode] = args.id.split(":");
       if (!onetouchtvId) return null;
       const contentKey = `content:onetouchtv:${onetouchtvId}`;
+      const contentType = args.type === "series" ? "series" : "movie";
       const cacheContent = cache.get(contentKey);
       let content: ContentDetail | null = cacheContent;
+      if (!content) {
+        const dbContent = await ProviderService.getDbContent(contentType, {
+          onetouchtvId,
+        });
+        content = dbContent ? dbContent : null;
+      }
       if (!content) {
         const providerContent = await getProviderContentById(
           `${prefix}:${onetouchtvId}`,

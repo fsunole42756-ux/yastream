@@ -1,9 +1,5 @@
-import {
-  index,
-  integer,
-  sqliteTable,
-  text
-} from "drizzle-orm/sqlite-core";
+import { relations } from "drizzle-orm";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { content } from "./content.js";
 
 export const providerContent = sqliteTable(
@@ -29,6 +25,15 @@ export const providerContent = sqliteTable(
       table.externalId,
     ),
   ],
+);
+export const providerContentRelations = relations(
+  providerContent,
+  ({ one }) => ({
+    content: one(content, {
+      fields: [providerContent.contentId],
+      references: [content.id],
+    }),
+  }),
 );
 
 export type EProviderContent = typeof providerContent.$inferSelect;

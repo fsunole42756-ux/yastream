@@ -1,5 +1,5 @@
 import type { ContentType } from "@stremio-addon/sdk";
-import { and, count, eq, lt, sql } from "drizzle-orm";
+import { and, count, eq, inArray, lt, or, sql } from "drizzle-orm";
 import type { ContentDetail } from "../source/meta.js";
 import { Logger } from "../utils/logger.js";
 import { db } from "./drizzle.js";
@@ -12,6 +12,7 @@ import {
 } from "./schema/provider_content.js";
 import { EStreamInsert, streams } from "./schema/streams.js";
 import { ESubtitleInsert, subtitles } from "./schema/subtitles.js";
+import { handleError } from "../utils/error.js";
 
 const logger = new Logger("DB");
 
@@ -65,9 +66,9 @@ export async function upsertContent(
           ttl: row.ttl,
         },
       });
-    logger.log(`Upserted content ${contentData.title}`);
-  } catch (e) {
-    logger.error(`Failed to upsert content ${id} | ${e}`);
+    logger.debug(`Upserted content ${contentData.title}`);
+  } catch (e: any) {
+    handleError(e, logger, `Failed to upsert content ${contentData.title}`);
   }
 }
 
@@ -78,6 +79,49 @@ export async function getContentByTmdb(
   if (!db) return;
   const row = await db.query.content.findFirst({
     where: and(eq(content.tmdbId, tmdbId), eq(content.type, type)),
+  });
+  return row;
+}
+
+export async function getProviderContentsById(id: string) {
+  if (!db) return;
+  const rows = await db.query.content.findFirst({
+    where: inArray(
+      content.id,
+      db
+        .select({ contentId: providerContent.contentId })
+        .from(providerContent)
+        .where(and(eq(providerContent.id, id))),
+    ),
+    with: {
+      providerContent: true,
+    },
+  });
+  return rows;
+}
+
+export async function getContentJoinProviderById(
+  type: ContentType,
+  imdbId?: string,
+  tmdbId?: number,
+  tvdbId?: number,
+) {
+  if (!db) return;
+  const row = await db.query.content.findFirst({
+    where: or(
+      imdbId
+        ? and(eq(content.imdbId, imdbId), eq(content.type, type))
+        : undefined,
+      tmdbId
+        ? and(eq(content.tmdbId, tmdbId.toString()), eq(content.type, type))
+        : undefined,
+      tvdbId
+        ? and(eq(content.tvdbId, tvdbId.toString()), eq(content.type, type))
+        : undefined,
+    ),
+    with: {
+      providerContent: true,
+    },
   });
   return row;
 }
@@ -108,11 +152,9 @@ export async function upsertProviderContent(
           ttl: row.ttl,
         },
       });
-    logger.log(`Upserted provider_content ${row.title}`);
-  } catch (e) {
-    logger.error(
-      `Failed to upsert provider_content ${providerContentData.id} | ${e}`,
-    );
+    logger.debug(`Upserted provider_content ${row.title}`);
+  } catch (e: any) {
+    handleError(e, logger, `Failed to upsert provider_content ${row.title}`);
   }
 }
 
@@ -173,13 +215,15 @@ export async function upsertStream(stream: Omit<EStreamInsert, "createdAt">[]) {
         },
       });
     const row = rows[0];
-    logger.log(
+    logger.debug(
       `Upserted streams ${row?.providerContentId}:${row?.season}:${row?.episode}`,
     );
   } catch (e) {
     const row = rows[0];
-    logger.error(
-      `Failed to upsert streams ${row?.providerContentId}:${row?.season}:${row?.episode} | ${e}`,
+    handleError(
+      e,
+      logger,
+      `Failed to upsert streams ${row?.providerContentId}:${row?.season}:${row?.episode}`,
     );
   }
 }
@@ -254,13 +298,15 @@ export async function upsertSubtitles(
         },
       });
     const row = rows[0];
-    logger.log(
+    logger.debug(
       `Upserted subtitles ${row?.providerContentId}:${row?.season}:${row?.episode}`,
     );
   } catch (e) {
     const row = rows[0];
-    logger.error(
-      `Failed to upsert subtitles ${row?.providerContentId}:${row?.season}:${row?.episode} | ${e}`,
+    handleError(
+      e,
+      logger,
+      `Failed to upsert subtitles ${row?.providerContentId}:${row?.season}:${row?.episode}`,
     );
   }
 }
@@ -344,7 +390,7 @@ export async function setKvs(kvs: EKVInsert[]) {
       })
       .run();
   } catch (e) {
-    logger.error(`Failed to upsert kvs | ${e}`);
+    handleError(e, logger, `Failed to upsert kvs`);
   }
 }
 

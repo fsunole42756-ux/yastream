@@ -16,6 +16,7 @@ import {
   upsertStream,
   upsertSubtitles,
 } from "../db/queries.js";
+import { EContent } from "../db/schema/content.js";
 import { EProviderContentInsert } from "../db/schema/provider_content.js";
 import { EStreamInsert } from "../db/schema/streams.js";
 import { COMMON_TTL } from "../db/sqlite.js";
@@ -23,15 +24,16 @@ import { Prefix, UserConfig } from "../lib/manifest.js";
 import StreamService from "../service/resource/stream-service.js";
 import { axiosGet } from "../utils/axios.js";
 import { cache } from "../utils/cache.js";
+import { hashSHA256 } from "../utils/crypto.js";
 import { cleanUrl, extractTitle, formatStreamTitle } from "../utils/format.js";
 import { matchTitle } from "../utils/fuse.js";
-import { getDisplayResolution, parseStreamInfo } from "../utils/info.js";
+import { probeStreamInfo } from "../utils/info.js";
 import { CountryCode, iso639FromCountryCode } from "../utils/language.js";
 import { ContentDetail } from "./meta.js";
 import { getPosterUrl, PosterParam } from "./poster/poster.js";
 import { BaseProvider } from "./provider.js";
 import { tmdb } from "./tmdb.js";
-import { hashSHA256 } from "../utils/crypto.js";
+import SubtitleService from "../service/resource/subtitle-service.js";
 
 interface OnetouchtvTop {
   result: {
@@ -167,7 +169,7 @@ export class OnetouchtvScrapper extends BaseProvider {
     const tmdbDetails = await Promise.all(
       searchResults.result.map((item) => {
         const { title, year } = extractTitle(item.title);
-        return tmdb.searchDetailImdb(title, type, year);
+        return tmdb.searchDetail(title, type, year);
       }),
     );
     const posterResults = await Promise.all(
@@ -238,7 +240,7 @@ export class OnetouchtvScrapper extends BaseProvider {
       const tmdbDetails = await Promise.all(
         filteredData.map((item) => {
           const { title, year } = extractTitle(item.title);
-          return tmdb.searchDetailImdb(title, type, year);
+          return tmdb.searchDetail(title, type, year);
         }),
       );
       const metas = await Promise.all(
@@ -324,11 +326,12 @@ export class OnetouchtvScrapper extends BaseProvider {
       const releaseDate =
         new Date(detail.year).toISOString() || new Date().toISOString();
       let year = new Date(releaseDate).getFullYear();
-      const tmdbDetail = await tmdb.searchDetailImdb(detail.title, type);
+      const tmdbDetail = await tmdb.searchDetail(detail.title, type);
+      let oldContent: EContent | undefined = undefined;
       if (tmdbDetail) {
         detail.description = tmdbDetail.overview || detail.description;
         year = tmdbDetail.year;
-        const oldContent = await getContentByTmdb(tmdbDetail.id, type);
+        oldContent = await getContentByTmdb(tmdbDetail.id, type);
         if (oldContent) {
           upsertContent(oldContent.id, tmdbDetail, COMMON_TTL.content);
         }
@@ -350,8 +353,9 @@ export class OnetouchtvScrapper extends BaseProvider {
         };
         return video;
       });
+      let metaId = id;
       const meta: MetaDetail = {
-        id: id,
+        id: metaId,
         type: type,
         name: detail.title,
         poster: image,
@@ -361,6 +365,29 @@ export class OnetouchtvScrapper extends BaseProvider {
         genres: detail.genres,
         videos: videos,
       };
+      const existingContent = await getProviderContentById(metaId);
+      const contentId = oldContent ? oldContent.id : null;
+      if (existingContent && oldContent) {
+        await upsertProviderContent({
+          ...existingContent,
+          contentId: contentId,
+          image: detail.image,
+          year: year,
+          ttl: null,
+        });
+      } else {
+        await upsertProviderContent({
+          id: metaId,
+          contentId: contentId,
+          title: detail.title,
+          ttl: null,
+          provider: this.name,
+          externalId: detail.id,
+          image: detail.image,
+          year: year,
+          type: type,
+        });
+      }
       return meta;
     } catch (error) {
       this.logger.error(`Failed to get meta for ${content.title} | ${error}`);
@@ -376,17 +403,19 @@ export class OnetouchtvScrapper extends BaseProvider {
       const { title, type, year, season, episode, onetouchtvId, id } = content;
       const streamKey = `streams:${type}:${this.name}:${id}:${season}:${episode}:${config.info}`;
       const cacheStreams = cache.get(streamKey);
+      // Cached streams
       if (cacheStreams) return cacheStreams;
-      const savedStreams = await StreamService.getStreamsFromDb(
-        `${this.name}:${id}`,
+      // Db streams
+      const dbStreams = await StreamService.getDbStreams(
+        `${this.name}:${onetouchtvId}`,
         season ?? 1,
         episode ?? 1,
         this.displayName,
         config,
       );
-      if (savedStreams.length > 0) {
-        cache.set(streamKey, savedStreams, COMMON_TTL.stream);
-        return savedStreams;
+      if (dbStreams.length > 0) {
+        cache.set(streamKey, dbStreams, COMMON_TTL.stream);
+        return dbStreams;
       }
       let detail = null;
       if (onetouchtvId) {
@@ -398,6 +427,38 @@ export class OnetouchtvScrapper extends BaseProvider {
         detail = await this.getDetail(searchResult.id);
       }
       if (!detail) return [];
+      const tmdbDetail = await tmdb.searchDetail(content.title, type);
+      if (tmdbDetail) {
+        const oldContent = await getContentByTmdb(tmdbDetail.id, type);
+        if (oldContent) {
+          const contentId = oldContent.id;
+          upsertContent(contentId, tmdbDetail, COMMON_TTL.content);
+          const providerContent = await getProviderContentById(
+            `${Prefix.ONETOUCHTV}:${detail.result.id}`,
+          );
+          if (providerContent) {
+            upsertProviderContent({
+              ...providerContent,
+              contentId: contentId,
+              image: detail.result.image,
+              year: year,
+              ttl: null,
+            });
+          } else {
+            upsertProviderContent({
+              id: `${Prefix.ONETOUCHTV}:${onetouchtvId}`,
+              externalId: detail.result.id,
+              title: extractTitle(detail.result.title).title,
+              provider: this.name,
+              type: type,
+              contentId: contentId,
+              image: detail.result.image,
+              year: year,
+              ttl: null,
+            });
+          }
+        }
+      }
       const identifier = detail.result.episodes[0]?.identifier;
       const episodeId = identifier || detail.result.id;
       const episodeData = detail.result.episodes.find(
@@ -410,7 +471,7 @@ export class OnetouchtvScrapper extends BaseProvider {
       const streams = await Promise.all(
         episodeDetail.result.sources.map(async (source, index) => {
           const info = config.info
-            ? await parseStreamInfo(source.url)
+            ? await probeStreamInfo(source.url)
             : undefined;
           const formatTitle = formatStreamTitle(
             detail.result.title,
@@ -476,9 +537,18 @@ export class OnetouchtvScrapper extends BaseProvider {
 
   async getSubtitles(content: ContentDetail): Promise<Subtitle[]> {
     const { title, type, year, season, episode, id, onetouchtvId } = content;
-    const subKey = `subtitles:${type}:${this.name}:${id}:${season}:${episode}`;
-    const cachedSubtitles = cache.get(subKey);
+    const subtitleKey = `subtitles:${type}:${this.name}:${id}:${season}:${episode}`;
+    const cachedSubtitles = cache.get(subtitleKey);
     if (cachedSubtitles) return cachedSubtitles;
+    const savedSubtitles = await SubtitleService.getSubtitlesFromDb(
+      `${this.name}:${onetouchtvId}`,
+      content.season ?? 1,
+      content.episode ?? 1,
+    );
+    if (savedSubtitles.length > 0) {
+      cache.set(subtitleKey, savedSubtitles, COMMON_TTL.stream);
+      return savedSubtitles;
+    }
     let detail = null;
     if (onetouchtvId) {
       detail = await this.getDetail(onetouchtvId);
@@ -507,7 +577,7 @@ export class OnetouchtvScrapper extends BaseProvider {
       return subtitle;
     });
     if (subtitles.length > 0) {
-      cache.set(subKey, subtitles, 4 * 60 * 60 * 1000);
+      cache.set(subtitleKey, subtitles, 4 * 60 * 60 * 1000);
       upsertSubtitles(
         await Promise.all(
           subtitles.map(async (subtitle) => ({

@@ -4,19 +4,18 @@ import {
   getStream,
   getStreamsJoinProvider,
 } from "../../db/queries.js";
+import { UserConfig } from "../../lib/manifest.js";
 import { API, STREAMS } from "../../utils/constant.js";
 import { getOrigin } from "../../utils/domain.js";
-import { UserConfig } from "../../lib/manifest.js";
 import { formatStreamTitle } from "../../utils/format.js";
-import { parseStreamInfo, StreamInfo } from "../../utils/info.js";
-import { he } from "zod/locales";
+import { parseInfo, probeStreamInfo, StreamInfo } from "../../utils/info.js";
 
 class StreamService {
   static async getStream(id: string) {
     return getStream(id);
   }
 
-  static async getStreamsFromDb(
+  static async getDbStreams(
     id: string,
     season: number,
     episode: number,
@@ -35,28 +34,10 @@ class StreamService {
           if (stream.streams.playlist) {
             url = StreamService.getStreamUrl(stream.streams.id);
           }
-          let info: StreamInfo = {
-            size: 0,
-          };
+          let info: StreamInfo = parseInfo(stream.streams);
           if (config.info) {
-            info = (await parseStreamInfo(url)) || info;
-          } else {
-            if (stream.streams.size)
-              info.size = parseFloat(stream.streams.size);
-            if (stream.streams.duration) {
-              info.hours = parseInt(stream.streams.duration) / 60;
-              info.minutes = parseInt(stream.streams.duration) % 60;
-            }
-            if (stream.streams.resolution) {
-              const width = stream.streams.resolution.split("x")[0];
-              const height = stream.streams.resolution.split("x")[1];
-              if (width && height) {
-                info.resolution = {
-                  width: parseInt(width),
-                  height: parseInt(height),
-                };
-              }
-            }
+            const probeInfo = await probeStreamInfo(url);
+            info = probeInfo || info;
           }
           const formatTitle = formatStreamTitle(
             stream.provider_content.title,
